@@ -149,6 +149,9 @@ class RetinaNetLossComputation(object):
         ) / (pos_inds.sum() * 4)
         labels = labels.int()
 
+        # print(labels.max())
+        # print(box_cls.shape)
+
         retinanet_cls_loss =self.box_cls_loss_func(
             box_cls,
             labels

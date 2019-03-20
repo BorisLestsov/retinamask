@@ -2,9 +2,11 @@
 """
 Implements the Generalized R-CNN framework
 """
-
+import os 
 import torch
 from torch import nn
+
+import torchvision.transforms.functional as F
 
 from maskrcnn_benchmark.structures.image_list import to_image_list
 
@@ -35,8 +37,19 @@ class RetinaNet(nn.Module):
         #if cfg.MODEL.SPARSE_MASK_ON:
         #    self.mask = build_sparse_mask_head(cfg)
 
+        # self.adapt = False
+        # if self.adapt:
+        #     self.forward = self.forwardCLS
+        # else:
+        #     self.forward = self.forwardTRAIN
 
-    def forward(self, images, targets=None):
+    # def forward(self, *args, **kwargs):
+    #     if self.adapt:
+    #         return self.forwardADAPT(*args, **kwargs)
+    #     else:
+    #         return self.forwardTRAIN(*args, **kwargs)
+
+    def forward(self, images, targets=None, adapt=False):
         """
         Arguments:
             images (list[Tensor] or ImageList): images to be processed
@@ -58,6 +71,10 @@ class RetinaNet(nn.Module):
         rpn_features = features
         if self.cfg.RETINANET.BACKBONE == "p2p7":
             rpn_features = features[1:]
+
+        if adapt:
+            return rpn_features
+
         (anchors, detections), detector_losses = self.rpn(images, rpn_features, targets)
         if self.training:
             losses = {}
@@ -109,4 +126,41 @@ class RetinaNet(nn.Module):
                 else:
                     x, detections, mask_losses = self.mask(features, proposals, targets)
             return detections
+
+
+    def forwardADAPT(self, images, targets=None):
+        # images_bgr255 = images
+        images_bgr255 = ((images*0.5+0.5)*255)[:, [2,1,0], :, :]
+
+        for i in range(3):
+            images_bgr255[:, i, ...] -= self.cfg.INPUT.PIXEL_MEAN[i]
+            images_bgr255[:, i, ...] /= self.cfg.INPUT.PIXEL_STD[i]
+        tensor = images_bgr255
+
+        gpu_id = int(str(tensor.device)[-1])
+
+        #my_device = next(self.backbone.parameters()).device
+        #tensor = tensor.to(my_device)
+        #print("kek", my_device, images.device, tensor.device)
+        features = self.backbone(tensor)
+
+        # Retina RPN Output
+        rpn_features = features
+        if self.cfg.RETINANET.BACKBONE == "p2p7":
+            rpn_features = features[1:]
+
+        return rpn_features
+
+        img_list = to_image_list(images)
+
+        (anchors, detections), detector_losses = self.rpn(img_list, rpn_features, targets)
+        box_cls, box_regression = self.rpn.box_cls, self.rpn.box_regression
+
+        torch.save(detections, "tmp/det{}.pth".format(gpu_id))
+
+        # box_cls, box_regression = self.rpn.head(features)
+        # anchors = self.rpn.anchor_generator(img_list, features)
+        # (anchors, boxes), _ = self.rpn._forward_test(anchors, box_cls, box_regression)
+
+        return features, box_cls, box_regression
 

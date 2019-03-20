@@ -4,21 +4,34 @@ import torch
 from .lr_scheduler import WarmupMultiStepLR
 
 
-def make_optimizer(cfg, model):
+def make_optimizer(cfg, models):
     params = []
-    for key, value in model.named_parameters():
-        if not value.requires_grad:
-            continue
-        lr = cfg.SOLVER.BASE_LR
-        weight_decay = cfg.SOLVER.WEIGHT_DECAY
-        if "bias" in key:
-            lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.BIAS_LR_FACTOR
-            weight_decay = cfg.SOLVER.WEIGHT_DECAY_BIAS
-        params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
+    if not (isinstance(models, list) or isinstance(models, tuple)):
+        models = [models]
+
+    for model in models:
+        for key, value in model.named_parameters():
+            if not value.requires_grad:
+                continue
+            lr = cfg.SOLVER.BASE_LR
+            weight_decay = cfg.SOLVER.WEIGHT_DECAY
+            if "bias" in key:
+                lr = cfg.SOLVER.BASE_LR * cfg.SOLVER.BIAS_LR_FACTOR
+                weight_decay = cfg.SOLVER.WEIGHT_DECAY_BIAS
+            params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 
     optimizer = torch.optim.SGD(params, lr, momentum=cfg.SOLVER.MOMENTUM)
     return optimizer
 
+def make_optimizer_D(cfg, model):
+    params = []
+    for key, value in model.named_parameters():
+        if not value.requires_grad:
+            continue
+        params.append(value)
+
+    optimizer = torch.optim.Adam(params, lr=0.0003)
+    return optimizer
 
 def make_lr_scheduler(cfg, optimizer):
     return WarmupMultiStepLR(

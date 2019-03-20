@@ -158,7 +158,7 @@ class RetinaNetPostProcessor(torch.nn.Module):
             boxlist = boxlists[i]
             result = []
             # skip the background
-            for j in range(1, 81):
+            for j in range(1, 214):
                 inds = (labels == j).nonzero().view(-1)
                 if len(inds) == 0:
                     continue
@@ -205,13 +205,13 @@ class RetinaNetPostProcessor(torch.nn.Module):
 
 
 def make_retinanet_postprocessor(
-    config, fpn_post_nms_top_n, rpn_box_coder):
+    config, rpn_box_coder):
 
-    pre_nms_thresh = 0.05
+    pre_nms_thresh = config.MODEL.ROI_HEADS.SCORE_THRESH
     pre_nms_top_n =  config.RETINANET.PRE_NMS_TOP_N
-    nms_thresh = 0.4
-    fpn_post_nms_top_n = fpn_post_nms_top_n
-    min_size = 0
+    nms_thresh = config.MODEL.RPN.NMS_THRESH
+    fpn_post_nms_top_n = config.MODEL.RPN.FPN_POST_NMS_TOP_N_TEST
+    min_size = config.MODEL.RPN.MIN_SIZE
 
     # nms_thresh = config.MODEL.RPN.NMS_THRESH
     # min_size = config.MODEL.RPN.MIN_SIZE

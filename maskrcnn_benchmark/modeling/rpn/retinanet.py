@@ -111,14 +111,14 @@ class RetinaNetModule(torch.nn.Module):
 
         if self.cfg.MODEL.SPARSE_MASK_ON:
             box_selector_test = make_retinanet_detail_postprocessor(
-                cfg, 100, box_coder)
+                cfg, box_coder)
         else:
             box_selector_test = make_retinanet_postprocessor(
-                cfg, 100, box_coder)
+                cfg, box_coder)
         box_selector_train = None
         if self.cfg.MODEL.MASK_ON or self.cfg.MODEL.SPARSE_MASK_ON:
             box_selector_train = make_retinanet_postprocessor(
-                cfg, 100, box_coder)
+                cfg, box_coder)
 
         loss_evaluator = make_retinanet_loss_evaluator(cfg, box_coder)
 
@@ -144,8 +144,12 @@ class RetinaNetModule(torch.nn.Module):
                 testing, it is an empty dict.
         """
         box_cls, box_regression = self.head(features)
+
+        self.box_cls = box_cls
+        self.box_regression = box_regression
+
         anchors = self.anchor_generator(images, features)
- 
+
         if self.training:
             return self._forward_train(anchors, box_cls, box_regression, targets)
         else:

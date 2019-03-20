@@ -41,6 +41,10 @@ def build_dataset(dataset_list, transforms, dataset_catalog, is_train=True):
         dataset = factory(**args)
         datasets.append(dataset)
 
+    if len(datasets) > 1:
+        print("HEY MORE THAN ONE DATASET !")
+    return datasets
+
     # for testing, return a list of datasets
     if not is_train:
         return datasets
@@ -163,8 +167,10 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
             collate_fn=collator,
         )
         data_loaders.append(data_loader)
-    if is_train:
-        # during training, a single (possibly concatenated) data_loader is returned
-        assert len(data_loaders) == 1
-        return data_loaders[0]
+
+    print("HEY MORE THAN ONE DATASET AND NO ASSERT !")
+    # if is_train:
+    #     # during training, a single (possibly concatenated) data_loader is returned
+    #     assert len(data_loaders) == 1
+    #     return data_loaders[0]
     return data_loaders

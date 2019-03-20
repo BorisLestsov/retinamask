@@ -259,7 +259,7 @@ _C.RETINANET.SELFADJUST_SMOOTH_L1 = False
 
 # During inference, #locs to select based on cls score before NMS is performed
 # per FPN level
-_C.RETINANET.PRE_NMS_TOP_N = 1000
+_C.RETINANET.PRE_NMS_TOP_N = 10000
 
 # IoU overlap ratio for labeling an anchor as positive
 # Anchors with >= iou overlap are labeled positive

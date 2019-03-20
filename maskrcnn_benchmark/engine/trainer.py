@@ -9,6 +9,8 @@ from torch.distributed import deprecated as dist
 from maskrcnn_benchmark.utils.comm import get_world_size, get_rank
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
+from maskrcnn_benchmark.modeling.adapt.networks import GANLoss
+
 
 def reduce_loss_dict(loss_dict):
     """
@@ -35,12 +37,22 @@ def reduce_loss_dict(loss_dict):
     return reduced_losses
 
 
+# set requies_grad=Fasle to avoid computation
+def set_requires_grad(nets, requires_grad=False):
+    if not isinstance(nets, list):
+        nets = [nets]
+    for net in nets:
+        if net is not None:
+            for param in net.parameters():
+                param.requires_grad = requires_grad
+
+
 def do_train(
-    model,
-    data_loader,
-    optimizer,
-    scheduler,
-    checkpointer,
+    models,
+    data_loaders,
+    optimizers,
+    schedulers,
+    checkpointers,
     device,
     checkpoint_period,
     arguments,
@@ -48,12 +60,28 @@ def do_train(
     logger = logging.getLogger("maskrcnn_benchmark.trainer")
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
-    max_iter = len(data_loader)
+    max_iter = min([len(data_loader) for data_loader in data_loaders])
     start_iter = arguments["iteration"]
+
+    model, model_D = models
+    model_G = model.module.backbone
     model.train()
+    model_D.train()
+
+    optimizer, optimizer_D, optimizer_G = optimizers
+    scheduler, scheduler_D, scheduler_G = schedulers
+    checkpointer, checkpointer_D = checkpointers
+
+
+    criterionGAN = GANLoss(use_lsgan=True).to(device)
+
+
+
     start_training_time = time.time()
     end = time.time()
-    for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+
+
+    for iteration, ((images, targets, _), (images_adapt, targets_adapt, _)) in enumerate(zip(*data_loaders), start_iter):
         data_time = time.time() - end
         arguments["iteration"] = iteration
 
@@ -62,7 +90,7 @@ def do_train(
         images = images.to(device)
         targets = [target.to(device) for target in targets]
 
-        loss_dict = model(images, targets)
+        loss_dict = model(images, targets, adapt=False)
 
         losses = sum(loss for loss in loss_dict.values())
 
@@ -71,9 +99,64 @@ def do_train(
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
         meters.update(loss=losses_reduced, **loss_dict_reduced)
 
+
         optimizer.zero_grad()
         losses.backward()
         optimizer.step()
+
+
+        #forward G
+        images_adapt_A = images.to(device)
+        targets_adapt_A = [target.to(device) for target in targets_adapt]
+        feat_A = model(images_adapt_A, targets_adapt_A, adapt=True)
+
+        images_adapt_B = images_adapt.to(device)
+        targets_adapt_B = [target.to(device) for target in targets_adapt]
+        feat_B = model(images_adapt_B, targets_adapt_B, adapt=True)
+
+
+        set_requires_grad(model_D, False)
+        set_requires_grad(model_G, True)
+        optimizer_G.zero_grad()
+
+        #backward_G
+        loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1 
+        loss_G_dict = {'loss_G': loss_G}
+
+        losses_G = sum(loss for loss in loss_G_dict.values())
+
+        loss_G_dict_reduced = reduce_loss_dict(loss_G_dict)
+        losses_G_reduced = sum(loss for loss in loss_G_dict_reduced.values())
+        meters.update(loss_G=losses_G_reduced)
+
+        losses_G.backward(retain_graph=True)
+        optimizer_G.step()
+
+
+
+        #D
+        set_requires_grad(model_D, True)
+        optimizer_D.zero_grad()
+        optimizer_G.zero_grad()
+
+        #backward D
+        loss_D_synth_that_is_real = criterionGAN(model_D(feat_A), True)
+        loss_D_real_that_is_fake = criterionGAN(model_D(feat_B), False)
+
+
+        loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5 
+        loss_D_dict = {'loss_D': loss_D}
+
+        losses_D = sum(loss for loss in loss_D_dict.values())
+
+        loss_D_dict_reduced = reduce_loss_dict(loss_D_dict)
+        losses_D_reduced = sum(loss for loss in loss_D_dict_reduced.values())
+        meters.update(loss_D=losses_D_reduced)
+
+        loss_D.backward()
+        optimizer_D.step()
+
+
 
         batch_time = time.time() - end
         end = time.time()

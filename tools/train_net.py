@@ -14,46 +14,70 @@ import torch
 from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.data import make_data_loader
 from maskrcnn_benchmark.solver import make_lr_scheduler
-from maskrcnn_benchmark.solver import make_optimizer
+from maskrcnn_benchmark.solver import make_optimizer, make_optimizer_D
 from maskrcnn_benchmark.engine.inference import inference
 from maskrcnn_benchmark.engine.trainer import do_train
 from maskrcnn_benchmark.modeling.detector import build_detection_model
-from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer
+from maskrcnn_benchmark.utils.checkpoint import DetectronCheckpointer, Checkpointer
 from maskrcnn_benchmark.utils.collect_env import collect_env_info
 from maskrcnn_benchmark.utils.comm import synchronize, get_rank
 from maskrcnn_benchmark.utils.imports import import_file
 from maskrcnn_benchmark.utils.logger import setup_logger
 from maskrcnn_benchmark.utils.miscellaneous import mkdir
 
+from maskrcnn_benchmark.modeling.adapt.networks import define_D
 
 def train(cfg, local_rank, distributed):
-    model = build_detection_model(cfg)
-    device = torch.device(cfg.MODEL.DEVICE)
-    model.to(device)
+    model_det = build_detection_model(cfg)
+    model_D = define_D(256, 64)
+    print(model_D)
+    models = [model_det, model_D]
 
-    optimizer = make_optimizer(cfg, model)
-    scheduler = make_lr_scheduler(cfg, optimizer)
+    device = torch.device(cfg.MODEL.DEVICE)
+    for model in models:
+        model.to(device)
+
+    optimizer_det = make_optimizer(cfg, model_det)
+    scheduler_det = make_lr_scheduler(cfg, optimizer_det)
+
+    optimizer_G = make_optimizer(cfg, model_det.backbone)
+    scheduler_G = make_lr_scheduler(cfg, optimizer_G)
+
+    optimizer_D = make_optimizer_D(cfg, model_D)
+    scheduler_D = None
+
+    optimizers = [optimizer_det, optimizer_D, optimizer_G]
+    schedulers = [scheduler_det, scheduler_D, scheduler_G]
 
     if distributed:
-        model = torch.nn.parallel.deprecated.DistributedDataParallel(
-            model, device_ids=[local_rank], output_device=local_rank,
-            # this should be removed if we update BatchNorm stats
-            broadcast_buffers=False,
-        )
+        for i, model in enumerate(models):
+            models[i] = torch.nn.parallel.deprecated.DistributedDataParallel(
+                models[i], device_ids=[local_rank], output_device=local_rank,
+                # this should be removed if we update BatchNorm stats
+                broadcast_buffers=False,
+            )
 
     arguments = {}
-    arguments["iteration"] = 0
+    manual_iter = 30000
+    print("WARNING! MANUAL ITERATION IS", manual_iter)
+    arguments["iteration"] = manual_iter
 
     output_dir = cfg.OUTPUT_DIR
 
     save_to_disk = get_rank() == 0
-    checkpointer = DetectronCheckpointer(
-        cfg, model, optimizer, scheduler, output_dir, save_to_disk
+    checkpointer_det = DetectronCheckpointer(
+        cfg, model_det, optimizer_det, scheduler_det, output_dir, save_to_disk
     )
-    extra_checkpoint_data = checkpointer.load(cfg.MODEL.WEIGHT)
+    checkpointer_D = Checkpointer(
+        model_D, optimizer_D, None, output_dir, save_to_disk
+    )
+    checkpointers = [checkpointer_det, checkpointer_D]
+    print('WARNING! REMOVED "iteration" from train_net.py')
+    extra_checkpoint_data = checkpointer_det.load(cfg.MODEL.WEIGHT)
+    extra_checkpoint_data = {"iteration" : 0}
     arguments.update(extra_checkpoint_data)
 
-    data_loader = make_data_loader(
+    data_loaders = make_data_loader(
         cfg,
         is_train=True,
         is_distributed=distributed,
@@ -63,11 +87,11 @@ def train(cfg, local_rank, distributed):
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
     do_train(
-        model,
-        data_loader,
-        optimizer,
-        scheduler,
-        checkpointer,
+        models,
+        data_loaders,
+        optimizers,
+        schedulers,
+        checkpointers,
         device,
         checkpoint_period,
         arguments,

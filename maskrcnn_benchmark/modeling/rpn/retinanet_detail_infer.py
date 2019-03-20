@@ -163,7 +163,7 @@ class RetinaNetDetailPostProcessor(torch.nn.Module):
             boxlist = boxlists[i]
             result = []
             # skip the background
-            for j in range(1, 81):
+            for j in range(1, 214):
                 inds = (labels == j).nonzero().view(-1)
                 if len(inds) == 0:
                     continue
