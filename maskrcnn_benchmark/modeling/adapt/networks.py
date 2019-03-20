@@ -104,6 +104,8 @@ def define_D(input_nc, ndf, which_model_netD='n_layers',
         netD = NLayerDiscriminator(input_nc, ndf, n_layers_D, norm_layer=norm_layer, use_sigmoid=use_sigmoid)
     elif which_model_netD == 'pixel':
         netD = PixelDiscriminator(input_nc, ndf, norm_layer=norm_layer, use_sigmoid=use_sigmoid)
+    elif which_model_netD == 'det':
+        netD = FPNDisctriminator(input_nc, ndf, n_layers=n_layers_D,norm_layer=norm_layer, use_sigmoid=use_sigmoid)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' %
                                   which_model_netD)
@@ -157,8 +159,13 @@ class GANLoss(nn.Module):
         return target_tensor.expand_as(input)
 
     def __call__(self, input, target_is_real):
-        target_tensor = self.get_target_tensor(input, target_is_real)
-        return self.loss(input, target_tensor)
+        if not isinstance(input, (list, tuple)):
+            input = [input]
+        loss = 0
+        for inp in input:
+            target_tensor = self.get_target_tensor(inp, target_is_real)
+            loss = self.loss(inp, target_tensor) + loss
+        return loss
 
 
 # Defines the generator that consists of Resnet blocks between a few
@@ -453,6 +460,70 @@ class NLayerDiscriminator(nn.Module):
         # print("end", out.shape)
         #print(res.shape)
         return out
+
+class FPNDisctriminator(nn.Module):
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
+        super(FPNDisctriminator, self).__init__()
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        self.n_layers = n_layers
+
+        int_l = 3
+        kw = 1
+        padw = 0
+        nf_mult = 1
+        nf_mult_prev = 1
+        self.sequence = [nn.Sequential(*[
+            nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=1, padding=padw),
+            norm_layer(ndf * nf_mult),
+            nn.LeakyReLU(0.2, True)
+        ])]
+
+        for n in range(1, n_layers):
+            # nf_mult_prev = nf_mult
+            # nf_mult = min(2**n, 8)
+            self.sequence += [nn.Sequential(*[
+                nn.Conv2d(input_nc, ndf * nf_mult,
+                          kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True),
+
+                nn.Conv2d(ndf, ndf * nf_mult,
+                          kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+                norm_layer(ndf * nf_mult),
+                nn.LeakyReLU(0.2, True),
+
+                nn.Conv2d(ndf, 1,
+                          kernel_size=kw, stride=1, padding=padw, bias=use_bias),
+                norm_layer(1),
+                nn.LeakyReLU(0.2, True),
+
+            ])]
+
+        self.sequence = nn.ModuleList(self.sequence)
+
+
+        self.end = [
+            nn.AdaptiveAvgPool2d(1),
+            View(),
+            nn.Linear(ndf, 1)
+        ]
+        if use_sigmoid:
+            self.end += [nn.Sigmoid()]
+
+        self.end = nn.Sequential(*self.end)
+
+
+        # self.model = nn.Sequential(*sequence)
+
+    def forward(self, input):
+        res = []
+        for i in range(self.n_layers):
+            res.append(self.sequence[i](input[i]))
+        return res
 
 
 class PixelDiscriminator(nn.Module):

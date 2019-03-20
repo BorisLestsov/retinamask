@@ -29,7 +29,7 @@ from maskrcnn_benchmark.modeling.adapt.networks import define_D
 
 def train(cfg, local_rank, distributed):
     model_det = build_detection_model(cfg)
-    model_D = define_D(256, 64)
+    model_D = define_D(256, 64, which_model_netD='det', n_layers_D=5)
     print(model_D)
     models = [model_det, model_D]
 

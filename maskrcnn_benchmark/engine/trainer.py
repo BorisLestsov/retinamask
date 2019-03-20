@@ -120,7 +120,7 @@ def do_train(
         optimizer_G.zero_grad()
 
         #backward_G
-        loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1 
+        loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1
         loss_G_dict = {'loss_G': loss_G}
 
         losses_G = sum(loss for loss in loss_G_dict.values())
@@ -144,7 +144,7 @@ def do_train(
         loss_D_real_that_is_fake = criterionGAN(model_D(feat_B), False)
 
 
-        loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5 
+        loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5
         loss_D_dict = {'loss_D': loss_D}
 
         losses_D = sum(loss for loss in loss_D_dict.values())
