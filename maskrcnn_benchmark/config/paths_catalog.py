@@ -19,6 +19,34 @@ class DatasetCatalog(object):
             "img_dir": "shelves_part/shape_train2018",
             "ann_file": "shelves_part/annotations/instances_shape_train2018.json"
         },
+        "shelves_test": {
+            "img_dir": "shelves_test/shape_test2018",
+            "ann_file": "shelves_test/annotations/instances_shape_test2018.json"
+        },
+        "sku_test": {
+            "img_dir": "sku_test/shape_test2018",
+            "ann_file": "sku_test/annotations/instances_shape_test2018.json"
+        },
+        "sku_val": {
+            "img_dir": "sku_val/shape_val2018",
+            "ann_file": "sku_val/annotations/instances_shape_val2018.json"
+        },
+        "sku_train": {
+            "img_dir": "sku_train/shape_train2018",
+            "ann_file": "sku_train/annotations/instances_shape_train2018.json"
+        },
+        "sku_train10": {
+            "img_dir": "sku_train10/shape_train102018",
+            "ann_file": "sku_train10/annotations/instances_shape_train102018.json"
+        },
+        "sku_train1": {
+            "img_dir": "sku_train1/shape_train12018",
+            "ann_file": "sku_train1/annotations/instances_shape_train12018.json"
+        },
+        "sku_train01": {
+            "img_dir": "sku_train01/shape_train012018",
+            "ann_file": "sku_train01/annotations/instances_shape_train012018.json"
+        },
         "adapt_list": {
             "img_dir": "maps/trainB",
         },
@@ -123,7 +151,7 @@ class DatasetCatalog(object):
 
     @staticmethod
     def get(name):
-        if "coco" in name or "shelves" in name:
+        if "coco" in name or "shelves" in name or "sku" in name:
             data_dir = DatasetCatalog.DATA_DIR
             attrs = DatasetCatalog.DATASETS[name]
             args = dict(

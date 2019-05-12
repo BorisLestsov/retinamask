@@ -30,7 +30,15 @@ MODEL:
     FEATURE_EXTRACTOR: "FPN2MLPFeatureExtractor"
     PREDICTOR: "FPNPredictor"
 DATASETS:
-  TRAIN: ("shelves_train", "adapt_list")
+  # TRAIN: ("shelves_train", "adapt_list")
+  # TRAIN: ("shelves_train"")
+  # TRAIN: ("sku_train10", )
+  # TRAIN: ("sku_train1", )
+  TRAIN: ("sku_train01", )
+  # TEST: ("sku_val",)
+  TEST: ("sku_test",)
+  # TEST: ("shelves_test",)
+  # TEST: ("shelves_part",)
 INPUT:
   MIN_SIZE_TRAIN: (800,)
   MAX_SIZE_TRAIN: 1333

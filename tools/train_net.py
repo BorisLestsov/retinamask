@@ -58,7 +58,7 @@ def train(cfg, local_rank, distributed):
             )
 
     arguments = {}
-    manual_iter = 30000
+    manual_iter = 000
     print("WARNING! MANUAL ITERATION IS", manual_iter)
     arguments["iteration"] = manual_iter
 
@@ -86,9 +86,12 @@ def train(cfg, local_rank, distributed):
 
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
+    data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
+    arguments["need_adapt"] = False
     do_train(
         models,
         data_loaders,
+        data_loaders_val,
         optimizers,
         schedulers,
         checkpointers,

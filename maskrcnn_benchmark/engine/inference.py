@@ -5,6 +5,8 @@ import tempfile
 import time
 import os
 from collections import OrderedDict
+import cv2
+import numpy as np
 
 import torch
 
@@ -18,7 +20,6 @@ from ..utils.comm import synchronize
 
 from maskrcnn_benchmark.modeling.roi_heads.mask_head.inference import Masker
 from maskrcnn_benchmark.structures.boxlist_ops import boxlist_iou
-
 
 def compute_on_dataset(model, data_loader, device):
     model.eval()
@@ -166,7 +167,8 @@ def evaluate_box_proposals(
 
         # sort predictions in descending order
         # TODO maybe remove this and make it explicit in the documentation
-        inds = prediction.get_field("objectness").sort(descending=True)[1]
+        inds = prediction.get_field("scores").sort(descending=True)[1]
+        # inds = prediction.get_field("objectness").sort(descending=True)[1]
         prediction = prediction[inds]
 
         ann_ids = dataset.coco.getAnnIds(imgIds=original_id)
@@ -250,6 +252,7 @@ def evaluate_predictions_on_coco(
 
     coco_dt = coco_gt.loadRes(str(json_result_file))
     # coco_dt = coco_gt.loadRes(coco_results)
+    # coco_eval = COCOeval(coco_dt, coco_dt, iou_type)
     coco_eval = COCOeval(coco_gt, coco_dt, iou_type)
     coco_eval.evaluate()
     coco_eval.accumulate()
@@ -346,6 +349,29 @@ def check_expected_results(results, expected_results, sigma_tol):
             logger.info(msg)
 
 
+def overlay_boxes(image, predictions, col):
+    """
+    Adds the predicted boxes on top of the image
+
+    Arguments:
+        image (np.ndarray): an image as returned by OpenCV
+        predictions (BoxList): the result of the computation by the model.
+            It should contain the field `labels`.
+    """
+    predictions = predictions.resize((image.shape[1], image.shape[0]))
+    labels = predictions.get_field("labels")
+    boxes = predictions.bbox
+
+    for box in boxes:
+        box = box.to(torch.int64)
+        top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
+        image = cv2.rectangle(
+            # image, tuple(top_left), tuple(bottom_right), tuple(color), 1
+            image, tuple(top_left), tuple(bottom_right), col, min(image.shape[:2])//400
+        )
+
+    return image
+
 def inference(
     model,
     data_loader,
@@ -388,20 +414,23 @@ def inference(
 
     if box_only:
         logger.info("Evaluating bbox proposals")
-        areas = {"all": "", "small": "s", "medium": "m", "large": "l"}
+        # areas = {"all": "", "small": "s", "medium": "m", "large": "l"}
+        areas = {"all": ""}
         res = COCOResults("box_proposal")
-        for limit in [100, 1000]:
+        for limit in [300]:
             for area, suffix in areas.items():
                 stats = evaluate_box_proposals(
                     predictions, dataset, area=area, limit=limit
                 )
+                logger.info(stats)
                 key = "AR{}@{:d}".format(suffix, limit)
                 res.results["box_proposal"][key] = stats["ar"].item()
         logger.info(res)
         check_expected_results(res, expected_results, expected_results_sigma_tol)
         if output_folder:
             torch.save(res, os.path.join(output_folder, "box_proposals.pth"))
-        return
+        return res
+
     logger.info("Preparing results for COCO format")
     coco_results = {}
     if "bbox" in iou_types:
@@ -422,7 +451,24 @@ def inference(
                 dataset.coco, coco_results[iou_type], file_path, iou_type
             )
             results.update(res)
+
+            # print(res.evalImgs[0])
+
+        # dataset = coco_gt.loadRes(str(coco_results[iou_type]))
+
+        # for i in range(len(dataset)):
+        #     dt_m = res.evalImgs[i]['dtMatches'][0]
+        #     print(predictions[i].bbox.shape)
+        #     print(predictions[i].bbox.shape)
+        #     predictions[i].bbox = np.delete(predictions[i].bbox, (dt_m!=0).nonzero(), axis=0)
+        #     print(predictions[i].bbox.shape)
+        #     img = dataset.get_non_trans(i)
+        #     resimg = overlay_boxes(img, predictions[i], (0, 255, 0))
+        #     resimg = overlay_boxes(resimg, predictions[i], (0, 255, 0))
+        #     cv2.imwrite(f"tmp/res_{i}.png", cv2.resize(resimg, (resimg.shape[1]//4, resimg.shape[0]//4)))
+
     logger.info(results)
     check_expected_results(results, expected_results, expected_results_sigma_tol)
     if output_folder:
         torch.save(results, os.path.join(output_folder, "coco_results.pth"))
+    return results

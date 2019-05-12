@@ -11,6 +11,9 @@ from maskrcnn_benchmark.utils.metric_logger import MetricLogger
 
 from maskrcnn_benchmark.modeling.adapt.networks import GANLoss
 
+from maskrcnn_benchmark.engine.inference import inference
+from maskrcnn_benchmark.utils.comm import synchronize, get_rank, is_main_process
+
 
 def reduce_loss_dict(loss_dict):
     """
@@ -50,6 +53,7 @@ def set_requires_grad(nets, requires_grad=False):
 def do_train(
     models,
     data_loaders,
+    data_loaders_val,
     optimizers,
     schedulers,
     checkpointers,
@@ -62,6 +66,7 @@ def do_train(
     meters = MetricLogger(delimiter="  ")
     max_iter = min([len(data_loader) for data_loader in data_loaders])
     start_iter = arguments["iteration"]
+    need_adapt = arguments["need_adapt"]
 
     model, model_D = models
     model_G = model.module.backbone
@@ -75,13 +80,38 @@ def do_train(
 
     criterionGAN = GANLoss(use_lsgan=True).to(device)
 
-
-
     start_training_time = time.time()
     end = time.time()
 
+    AR_best = None
+    for iteration, data in enumerate(zip(*data_loaders), start_iter):
+        if len(data) == 2:
+            (images, targets, _), (images_adapt, targets_adapt, _) = data
+        else:
+            images, targets, _ = data[0]
 
-    for iteration, ((images, targets, _), (images_adapt, targets_adapt, _)) in enumerate(zip(*data_loaders), start_iter):
+        if (iteration+0) % checkpoint_period == 0:
+            model.module.training = False
+            output_folders = [None] * len(data_loaders_val)
+            for output_folder, data_loader_val in zip(output_folders, data_loaders_val):
+                results = inference(
+                    model,
+                    data_loader_val,
+                    iou_types=('bbox',),
+                    #box_only=cfg.MODEL.RPN_ONLY,
+                    box_only=True,
+                    output_folder=output_folder,
+                )
+                synchronize()
+                if is_main_process():
+                    AR = results.results['box_proposal']['AR@300']
+                    print("AR@300:", AR)
+                    if AR_best is None or AR>AR_best:
+                        AR_best = AR
+                        checkpointer.save("model_best{:07d}".format(iteration+1), **arguments)
+        model.module.training = True
+        model.module.rpn.training = True
+
         data_time = time.time() - end
         arguments["iteration"] = iteration
 
@@ -105,56 +135,55 @@ def do_train(
         optimizer.step()
 
 
-        #forward G
-        images_adapt_A = images.to(device)
-        targets_adapt_A = [target.to(device) for target in targets_adapt]
-        feat_A = model(images_adapt_A, targets_adapt_A, adapt=True)
+        if need_adapt:
+            #forward G
+            images_adapt_A = images.to(device)
+            targets_adapt_A = [target.to(device) for target in targets_adapt]
+            feat_B = model(images_adapt_A, targets_adapt_A, adapt=True)
 
-        images_adapt_B = images_adapt.to(device)
-        targets_adapt_B = [target.to(device) for target in targets_adapt]
-        feat_B = model(images_adapt_B, targets_adapt_B, adapt=True)
-
-
-        set_requires_grad(model_D, False)
-        set_requires_grad(model_G, True)
-        optimizer_G.zero_grad()
-
-        #backward_G
-        loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1
-        loss_G_dict = {'loss_G': loss_G}
-
-        losses_G = sum(loss for loss in loss_G_dict.values())
-
-        loss_G_dict_reduced = reduce_loss_dict(loss_G_dict)
-        losses_G_reduced = sum(loss for loss in loss_G_dict_reduced.values())
-        meters.update(loss_G=losses_G_reduced)
-
-        losses_G.backward(retain_graph=True)
-        optimizer_G.step()
+            images_adapt_B = images_adapt.to(device)
+            targets_adapt_B = [target.to(device) for target in targets_adapt]
+            feat_A = model(images_adapt_B, targets_adapt_B, adapt=True)
 
 
+            set_requires_grad(model_D, False)
+            set_requires_grad(model_G, True)
+            optimizer_G.zero_grad()
 
-        #D
-        set_requires_grad(model_D, True)
-        optimizer_D.zero_grad()
-        optimizer_G.zero_grad()
+            #backward_G
+            loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1
+            loss_G_dict = {'loss_G': loss_G}
 
-        #backward D
-        loss_D_synth_that_is_real = criterionGAN(model_D(feat_A), True)
-        loss_D_real_that_is_fake = criterionGAN(model_D(feat_B), False)
+            losses_G = sum(loss for loss in loss_G_dict.values())
+
+            loss_G_dict_reduced = reduce_loss_dict(loss_G_dict)
+            losses_G_reduced = sum(loss for loss in loss_G_dict_reduced.values())
+            meters.update(loss_G=losses_G_reduced)
+
+            losses_G.backward(retain_graph=True)
+            optimizer_G.step()
+
+            #D
+            set_requires_grad(model_D, True)
+            optimizer_D.zero_grad()
+            optimizer_G.zero_grad()
+
+            #backward D
+            loss_D_synth_that_is_real = criterionGAN(model_D(feat_A), True)
+            loss_D_real_that_is_fake = criterionGAN(model_D(feat_B), False)
 
 
-        loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5
-        loss_D_dict = {'loss_D': loss_D}
+            loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5
+            loss_D_dict = {'loss_D': loss_D}
 
-        losses_D = sum(loss for loss in loss_D_dict.values())
+            losses_D = sum(loss for loss in loss_D_dict.values())
 
-        loss_D_dict_reduced = reduce_loss_dict(loss_D_dict)
-        losses_D_reduced = sum(loss for loss in loss_D_dict_reduced.values())
-        meters.update(loss_D=losses_D_reduced)
+            loss_D_dict_reduced = reduce_loss_dict(loss_D_dict)
+            losses_D_reduced = sum(loss for loss in loss_D_dict_reduced.values())
+            meters.update(loss_D=losses_D_reduced)
 
-        loss_D.backward()
-        optimizer_D.step()
+            loss_D.backward()
+            optimizer_D.step()
 
 
 
