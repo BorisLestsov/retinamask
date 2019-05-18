@@ -68,9 +68,10 @@ def do_train(
     start_iter = arguments["iteration"]
     need_adapt = arguments["need_adapt"]
 
-    model, model_D = models
-    model_G = model.module.backbone
+    model, model_G, model_D = models
+    model
     model.train()
+    model_G.train()
     model_D.train()
 
     optimizer, optimizer_D, optimizer_G = optimizers
@@ -117,22 +118,42 @@ def do_train(
 
         scheduler.step()
 
-        images = images.to(device)
-        targets = [target.to(device) for target in targets]
-
-        loss_dict = model(images, targets, adapt=False)
-
-        losses = sum(loss for loss in loss_dict.values())
-
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_loss_dict(loss_dict)
-        losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-        meters.update(loss=losses_reduced, **loss_dict_reduced)
 
 
-        optimizer.zero_grad()
-        losses.backward()
-        optimizer.step()
+        # images = images.to(device)
+        # targets = [target.to(device) for target in targets]
+        #
+        # loss_dict = model(images, targets, adapt=False)
+        #
+        # losses = sum(loss for loss in loss_dict.values())
+        #
+        # # reduce losses over all GPUs for logging purposes
+        # loss_dict_reduced = reduce_loss_dict(loss_dict)
+        # losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+        # meters.update(loss=losses_reduced, **loss_dict_reduced)
+        #
+        # optimizer.zero_grad()
+        # losses.backward()
+        # optimizer.step()
+
+
+
+        # images = images_adapt.to(device)
+        # targets = [target.to(device) for target in targets_adapt]
+        #
+        # loss_dict = model(images, targets, adapt=False)
+        #
+        # losses = sum(loss for loss in loss_dict.values())
+        #
+        # # reduce losses over all GPUs for logging purposes
+        # loss_dict_reduced = reduce_loss_dict(loss_dict)
+        # losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+        # meters.update(loss_2=losses_reduced, **loss_dict_reduced)
+        #
+        #
+        # optimizer.zero_grad()
+        # losses.backward()
+        # optimizer.step()
 
 
         if need_adapt:

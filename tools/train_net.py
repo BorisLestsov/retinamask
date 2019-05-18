@@ -30,8 +30,7 @@ from maskrcnn_benchmark.modeling.adapt.networks import define_D
 def train(cfg, local_rank, distributed):
     model_det = build_detection_model(cfg)
     model_D = define_D(256, 64, which_model_netD='det', n_layers_D=5)
-    print(model_D)
-    models = [model_det, model_D]
+    models = [model_det, model_det.backbone, model_D]
 
     device = torch.device(cfg.MODEL.DEVICE)
     for model in models:
@@ -58,7 +57,7 @@ def train(cfg, local_rank, distributed):
             )
 
     arguments = {}
-    manual_iter = 000
+    manual_iter = 0
     print("WARNING! MANUAL ITERATION IS", manual_iter)
     arguments["iteration"] = manual_iter
 
@@ -87,7 +86,7 @@ def train(cfg, local_rank, distributed):
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
     data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
-    arguments["need_adapt"] = False
+    arguments["need_adapt"] = True
     do_train(
         models,
         data_loaders,
