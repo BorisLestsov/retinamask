@@ -31,8 +31,10 @@ def reduce_loss_dict(loss_dict):
             loss_names.append(k)
             all_losses.append(v)
         all_losses = torch.stack(all_losses, dim=0)
-        dist.reduce(all_losses, dst=0)
-        if dist.get_rank() == 0:
+        # dist.reduce(all_losses, dst=0)
+        dist.all_reduce(all_losses)
+        # if dist.get_rank() == 0:
+        if True:
             # only main process gets accumulated, so only divide by
             # world_size in this case
             all_losses /= world_size
@@ -69,7 +71,6 @@ def do_train(
     need_adapt = arguments["need_adapt"]
 
     model, model_G, model_D = models
-    model
     model.train()
     model_G.train()
     model_D.train()
@@ -79,10 +80,12 @@ def do_train(
     checkpointer, checkpointer_D = checkpointers
 
 
-    criterionGAN = GANLoss(use_lsgan=True).to(device)
+    criterionGAN = GANLoss(use_lsgan=False).to(device)
 
     start_training_time = time.time()
     end = time.time()
+
+    last_acc_D = 0
 
     AR_best = None
     for iteration, data in enumerate(zip(*data_loaders), start_iter):
@@ -91,8 +94,12 @@ def do_train(
         else:
             images, targets, _ = data[0]
 
-        if (iteration+0) % checkpoint_period == 0:
+        if (iteration +1) % checkpoint_period == 0:
+            if need_adapt:
+                gt_backbone = model.module.backbone
+                model.module.backbone = model_G
             model.module.training = False
+
             output_folders = [None] * len(data_loaders_val)
             for output_folder, data_loader_val in zip(output_folders, data_loaders_val):
                 results = inference(
@@ -110,8 +117,10 @@ def do_train(
                     if AR_best is None or AR>AR_best:
                         AR_best = AR
                         checkpointer.save("model_best{:07d}".format(iteration+1), **arguments)
-        model.module.training = True
-        model.module.rpn.training = True
+            if need_adapt:
+                model.module.backbone = gt_backbone
+            model.module.training = True
+            model.module.rpn.training = True
 
         data_time = time.time() - end
         arguments["iteration"] = iteration
@@ -120,21 +129,22 @@ def do_train(
 
 
 
-        # images = images.to(device)
-        # targets = [target.to(device) for target in targets]
-        #
-        # loss_dict = model(images, targets, adapt=False)
-        #
-        # losses = sum(loss for loss in loss_dict.values())
-        #
-        # # reduce losses over all GPUs for logging purposes
-        # loss_dict_reduced = reduce_loss_dict(loss_dict)
-        # losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-        # meters.update(loss=losses_reduced, **loss_dict_reduced)
-        #
-        # optimizer.zero_grad()
-        # losses.backward()
-        # optimizer.step()
+        if last_acc_D > 0.7 and iteration > 50:
+            images = images.to(device)
+            targets = [target.to(device) for target in targets]
+
+            loss_dict = model(images, targets, adapt=False)
+
+            losses = sum(loss for loss in loss_dict.values())
+
+            # reduce losses over all GPUs for logging purposes
+            loss_dict_reduced = reduce_loss_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+            meters.update(loss=losses_reduced, **loss_dict_reduced)
+
+            optimizer.zero_grad()
+            losses.backward()
+            optimizer.step()
 
 
 
@@ -159,17 +169,20 @@ def do_train(
         if need_adapt:
             #forward G
             images_adapt_A = images.to(device)
-            targets_adapt_A = [target.to(device) for target in targets_adapt]
-            feat_B = model(images_adapt_A, targets_adapt_A, adapt=True)
-
+            targets_adapt_A = [target.to(device) for target in targets]
             images_adapt_B = images_adapt.to(device)
             targets_adapt_B = [target.to(device) for target in targets_adapt]
-            feat_A = model(images_adapt_B, targets_adapt_B, adapt=True)
 
+            # feat_B = model_G(images_adapt_A, targets_adapt_A, adapt=True)
+            feat_A = model_G(images_adapt_A.tensors)
+
+            # feat_A = model_G(images_adapt_B, targets_adapt_B, adapt=True)
+            feat_B = model_G(images_adapt_B.tensors)
 
             set_requires_grad(model_D, False)
             set_requires_grad(model_G, True)
             optimizer_G.zero_grad()
+            optimizer_D.zero_grad()
 
             #backward_G
             loss_G = 2 * criterionGAN(model_D(feat_B), True)     *     0.1
@@ -182,22 +195,44 @@ def do_train(
             meters.update(loss_G=losses_G_reduced)
 
             losses_G.backward(retain_graph=True)
-            optimizer_G.step()
+            # losses_G.backward()
+            if last_acc_D > 0.8 and iteration > 50:
+                print("OPT G!")
+                optimizer_G.step()
 
             #D
+            # set_requires_grad(model_G, False)
             set_requires_grad(model_D, True)
             optimizer_D.zero_grad()
             optimizer_G.zero_grad()
 
             #backward D
-            loss_D_synth_that_is_real = criterionGAN(model_D(feat_A), True)
-            loss_D_real_that_is_fake = criterionGAN(model_D(feat_B), False)
+            pred_D_A = model_D(feat_A)
+            pred_D_B = model_D(feat_B)
+            loss_D_synth_that_is_real = criterionGAN(pred_D_A, True)
+            loss_D_real_that_is_fake = criterionGAN(pred_D_B, False)
 
 
             loss_D = (loss_D_synth_that_is_real + loss_D_real_that_is_fake) * 0.5     *     0.5
             loss_D_dict = {'loss_D': loss_D}
 
+            loss_D_dict_reduced = reduce_loss_dict(loss_D_dict)
             losses_D = sum(loss for loss in loss_D_dict.values())
+
+            all_A = torch.cat([t.flatten() for t in pred_D_A])
+            all_B = torch.cat([t.flatten() for t in pred_D_B])
+            acc_A = (all_A>0.5).sum().item()/all_A.numel()
+            acc_B = (all_B<0.5).sum().item()/all_B.numel()
+            last_acc_D = (acc_A + acc_B)/2
+
+            acc_dict = {"last_acc_D" : torch.tensor(last_acc_D).cuda()}
+            acc_dict_reduced = reduce_loss_dict(acc_dict)
+            acc_reduced = sum(loss for loss in acc_dict_reduced.values())
+            last_acc_D = acc_reduced
+
+            meters.update(acc_D=last_acc_D)
+            meters.update(acc_A=acc_A)
+            meters.update(acc_B=acc_B)
 
             loss_D_dict_reduced = reduce_loss_dict(loss_D_dict)
             losses_D_reduced = sum(loss for loss in loss_D_dict_reduced.values())

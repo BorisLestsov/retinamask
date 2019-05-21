@@ -521,9 +521,40 @@ class FPNDisctriminator(nn.Module):
 
     def forward(self, input):
         res = []
-        for i in range(self.n_layers):
+        for i in range(len(input)):
             res.append(self.sequence[i](input[i]))
         return res
+
+
+class DEBUG_DESC(nn.Module):
+    def __init__(self, input_nc, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False):
+        super(DEBUG_DESC, self).__init__()
+
+        ks = 1
+        pad = ks//2
+        self.ls = []
+        for i in range(n_layers):
+            convs = [
+                    nn.Conv2d(input_nc, ndf, kernel_size=ks, stride=1, padding=pad, bias=True),
+                    nn.ReLU(),
+            ]
+            for j in range(3):
+                convs.append(nn.Conv2d(ndf, ndf, kernel_size=ks, stride=1, padding=pad, bias=True))
+                convs.append(nn.ReLU())
+            convs.append(nn.Conv2d(ndf, 1, kernel_size=ks, stride=1, padding=pad, bias=True))
+            if use_sigmoid:
+                convs.append(nn.Sigmoid())
+
+            convs = torch.nn.Sequential(*convs)
+            self.ls.append(convs)
+        self.ls = torch.nn.ModuleList(self.ls)
+
+    def forward(self, input):
+        res = []
+        for i, inp in enumerate(input):
+            res.append(self.ls[i](inp))
+        return res
+
 
 
 class PixelDiscriminator(nn.Module):

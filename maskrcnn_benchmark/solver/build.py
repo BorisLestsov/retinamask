@@ -23,7 +23,7 @@ def make_optimizer(cfg, models):
     optimizer = torch.optim.SGD(params, lr, momentum=cfg.SOLVER.MOMENTUM)
     return optimizer
 
-def make_optimizer_D(cfg, model):
+def make_optimizer_Adam(cfg, model):
     params = []
     for key, value in model.named_parameters():
         if not value.requires_grad:

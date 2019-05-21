@@ -31,7 +31,7 @@ MODEL:
     PREDICTOR: "FPNPredictor"
 DATASETS:
   # TRAIN: ("shelves_train", "adapt_list")
-  TRAIN: ("shelves_train", "sku_train01")
+  TRAIN: ("shelves_train", "sku_train")
   # TRAIN: ("shelves_train")
   # TRAIN: ("shelves_train", "sku_train")
   # TRAIN: ("sku_train", )

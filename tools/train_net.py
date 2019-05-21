@@ -14,7 +14,7 @@ import torch
 from maskrcnn_benchmark.config import cfg
 from maskrcnn_benchmark.data import make_data_loader
 from maskrcnn_benchmark.solver import make_lr_scheduler
-from maskrcnn_benchmark.solver import make_optimizer, make_optimizer_D
+from maskrcnn_benchmark.solver import make_optimizer, make_optimizer_Adam
 from maskrcnn_benchmark.engine.inference import inference
 from maskrcnn_benchmark.engine.trainer import do_train
 from maskrcnn_benchmark.modeling.detector import build_detection_model
@@ -27,10 +27,17 @@ from maskrcnn_benchmark.utils.miscellaneous import mkdir
 
 from maskrcnn_benchmark.modeling.adapt.networks import define_D
 
+import copy
+from maskrcnn_benchmark.modeling.adapt.networks import DEBUG_DESC
+
+
 def train(cfg, local_rank, distributed):
     model_det = build_detection_model(cfg)
-    model_D = define_D(256, 64, which_model_netD='det', n_layers_D=5)
-    models = [model_det, model_det.backbone, model_D]
+    model_G = model_det.backbone
+    # model_G = copy.deepcopy(model_det).backbone
+    # model_D = define_D(256, 64, which_model_netD='det', n_layers_D=5)
+    model_D = DEBUG_DESC(256, 64, n_layers=5, use_sigmoid=True)
+    models = [model_det, model_G, model_D]
 
     device = torch.device(cfg.MODEL.DEVICE)
     for model in models:
@@ -39,10 +46,12 @@ def train(cfg, local_rank, distributed):
     optimizer_det = make_optimizer(cfg, model_det)
     scheduler_det = make_lr_scheduler(cfg, optimizer_det)
 
+    # optimizer_G = make_optimizer_Adam(cfg, model_det.backbone)
     optimizer_G = make_optimizer(cfg, model_det.backbone)
-    scheduler_G = make_lr_scheduler(cfg, optimizer_G)
+    scheduler_G = None
 
-    optimizer_D = make_optimizer_D(cfg, model_D)
+    optimizer_D = make_optimizer_Adam(cfg, model_D)
+    # optimizer_D = make_optimizer(cfg, model_D)
     scheduler_D = None
 
     optimizers = [optimizer_det, optimizer_D, optimizer_G]
