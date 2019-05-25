@@ -231,6 +231,7 @@ def evaluate_box_proposals(
         recalls[i] = (gt_overlaps >= t).float().sum() / float(num_pos)
     # ar = 2 * np.trapz(recalls, thresholds)
     ar = recalls.mean()
+    print(recalls)
     return {
         "ar": ar,
         "recalls": recalls,

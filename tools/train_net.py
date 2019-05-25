@@ -95,7 +95,9 @@ def train(cfg, local_rank, distributed):
     checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
 
     data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
-    arguments["need_adapt"] = True
+    arguments["need_adapt"] = False
+    arguments["need_train_A"] = False
+    arguments["need_train_B"] = True
     do_train(
         models,
         data_loaders,
